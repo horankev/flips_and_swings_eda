@@ -1246,7 +1246,7 @@ df_nb <- as_Spatial(df)
 
 swing.nb <- poly2nb(df |> st_buffer(dist=2000))
 plot(df_nb, border="black")
-plot(swing.nb, df_nb, add = TRUE, pch = ".", col = "red")
+plot(swing.nb, df_nb, add = TRUE, pch = ".", col = "darkred", lwd=0.5)
 title(main = "England & Wales", sub = "Neighbourhood structure")
 ```
 
@@ -1255,8 +1255,8 @@ lon <- df  |>
   filter(region == "London") |> 
   as_Spatial()
 swing.nb2 <- poly2nb(lon)
-plot(lon, border="grey")
-plot(swing.nb2, lon, add = TRUE, pch = ".", col = "red")
+plot(lon, border="black")
+plot(swing.nb2, lon, add = TRUE, pch = ".", col = "darkred", lwd=1)
 title(main = "London", sub = "Neighbourhood structure\n(excluding links to neighbours outside of London)")
 ```
 
@@ -1430,7 +1430,10 @@ tm_shape(df) +
   tm_shape(regions) + tm_borders(lwd=1)
 
 df_moran <- moran.test(df$model0resids, df_wts, zero.policy = TRUE)
+```
 
+
+```{r, fig.width=6, fig.align='center'}
 moran.plot(df$model0resids, 
            df_wts, 
            zero.policy = TRUE,
@@ -1443,7 +1446,7 @@ title(main = paste0("Moran's I = ",
 
 #### Flip and swing graphics
 
-```{r}
+```{r, fig.width=12}
 flipdf <- tibble(
   party = rep(factor(c("Labour","Conservative","Others")),2),
   `% votes` = c(45,40,15,42,46,12),
@@ -1451,10 +1454,11 @@ flipdf <- tibble(
   winner = factor(c(1,0,0,0,1,0))
 )
 
+ggarrange(
 ggplot(flipdf,aes(party,`% votes`,fill=party)) + geom_col(aes(colour=winner,size=winner), show.legend = FALSE) + 
-  scale_size_manual(values = c(0.1,2,0.1,2,0.1,0.1)) + 
+  scale_size_manual(values = c(0.1,3,0.1,3,0.1,0.1)) + 
   scale_fill_manual(values = rep(c("darkblue","darkred","gray25"),2)) + 
-   scale_colour_manual(values = c("black","springgreen","black","black","black","springgreen")) + 
+   scale_colour_manual(values = c("black","darkorange1","black","black","black","darkorange1")) + 
  facet_wrap(~year) + 
   theme_bw() +
     geom_text(aes(label = paste0(`% votes`,"%")),
@@ -1462,29 +1466,38 @@ ggplot(flipdf,aes(party,`% votes`,fill=party)) + geom_col(aes(colour=winner,size
               position = position_stack(vjust = .5),
               size=7) + 
   labs(title = "Constituency X") + 
-  ylim(0,50)
+  ylim(0,50),
 
+ggarrange(
 ggplot(flipdf |> filter(party == "Conservative"),aes(party,`% votes`,fill=party)) + geom_col(colour="black") + 
   scale_fill_manual(values = rep(c("darkblue"),2)) + 
   facet_wrap(~year) + 
   theme_bw() +
+  theme(legend.position = "bottom") + 
     geom_text(aes(label = c("40%","+6%")),
               colour="white",
               position = position_stack(vjust = .5),
-              size=15) + 
+              size=10) + 
   labs(title = "Constituency X") + 
-  ylim(0,50)
+  ylim(0,50),
 
 ggplot(flipdf |> filter(party == "Labour"),aes(party,`% votes`,fill=party)) + geom_col(colour="black") + 
   scale_fill_manual(values = rep(c("darkred"),2)) + 
   facet_wrap(~year) + 
   theme_bw() +
+  theme(legend.position = "bottom") + 
     geom_text(aes(label = c("45%","-3%")),
               colour="white",
               position = position_stack(vjust = .5),
-              size=15) + 
+              size=10) + 
   labs(title = "Constituency X") + 
-  ylim(0,50)
+  ylim(0,50),
+
+ncol=2
+),
+
+ncol=2
+)
 ```
 
 #### Map of flips
