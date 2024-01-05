@@ -1,0 +1,1554 @@
+---
+output: 
+ md_document:
+    variant: markdown_github
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  comment = "#>"
+)
+```
+
+## Flips and swings
+
+The aim of this study is to examine the geographic effects of different census-based variables on the collapse of Labour's support in the 2019 UK general election. It seeks to examine whether these effects are consistent for different locations across the UK and for varying categories of constituency on a rural-urban spectrum, and if not, to describe this spatial heterogeneity.
+
+The poor performance of Labour in the election is commonly referred to as the collapse of Labour's "*red wall*'. This referred to the impression that voters in a collection of constituencies, which had been reliably supportive of Labour for many years, had switched their allegiance in 2019 to the Conservatives. Such seats were exclusively in England and Wales. As a results, Scotland and Northern Ireland have been excluded from the study because the primary contests in those nations are not directly between the Conservatives and Labour as they are in the majority of constituencies of England and Wales.
+
+Firstly, this study will define what this "*red wall*" might mean in concrete terms, rather than as a phenomenon commonly applied in newspaper headlines. The results will be analysed in terms of the binary outcome of a seat "*flipping*" or "*not flipping*", where these phrases refer to the Conservatives taking, or failing to take, seats which Labour held from the previous election of 2017.
+
+Following this, the study extends beyond the flipping of seats to examine a continuous variable, the "*swing*", which measures on a constituency-by-constituency basis the extent of switching from one party to another.
+
+### Data
+
+The electoral and census data is sourced from the `parlitools` package in R. The electoral data is the published results of the 2019 elections, in addition those from 2017, 2015 and 2010. This information is combined with information from the 2011 census, aggregated to the level of Westminster constituencies, which provides a host of information about the demographic and economic composition of each constituency. It features 191 variables, from which six have been selected as being representative. These variables are:
+
+| Variable name    | Composition                                                                     |
+|---------------------|---------------------------------------------------|
+| `low_qual`       | \% of population whose highest qualification is 'no qualification' or 'level 1' |
+| `deprived`       | \% of population categorised as exhibiting levels 1-4 of deprivation            |
+| `over65`         | \% of population aged 65 or over                                                |
+| `born_elsewhere` | \% of population born outside of the UK                                         |
+| `student`        | \% of population registered as students                                         |
+| `density`        | number of people per square unit                                                |
+
+: Variables derived from 2011 census
+
+Finally, one of seven categories is applied to each constituency placing it in a position on a spectrum ranging from `Village or smaller`, via `medium towns` and `non-core cities`, to `core cities` and `London`. This data comes from a research briefing called "*City & Town Classification of Constituencies & Local Authorities*", published in 2018 by the House of Commons Library, which estimates the percentage of each constituency which falls into each category. For this study, the category which is largest in each constituency is attributed to the whole constituency.
+
+Throughout the study, `con_19` will refer to the percentage of legitimate votes which were cast for the Conservatives (along with equivalent variables such as `con_17`, `lab_19` and `lab_17`). The measure of swing which will be used is called the "*Butler swing*", hereafter abbreviated to `con_swing`, and is calculated as follows:
+
+![](/Users/kevinhoran/Documents/R/SecondTermProject/Screenshot%202022-09-10%20at%2021.22.05.png){fig-align="center" height="40"}
+
+The resultant variable should be interpreted as the swing from Labour to the Conservatives between the 2017 and 2019 general elections.
+
+```{r, echo=FALSE}
+#| code-fold: false
+packages <- c(
+  "MASS",
+  "tidyverse",
+  "sf",
+  "tmap",
+  "here",
+  "spdep", # areal data
+  "grid",
+  "GWmodel",
+  "kableExtra",
+  "cowplot",
+  "parlitools",
+  "corrplot",
+  "lme4",
+  "mgcv",
+  "ggfortify",
+  "ggforce", # has geom_circle
+  "gridExtra",
+  "car",
+  "rgeoda", # for LISA
+  "ggpubr",
+  "ggrepel",
+  "ggpointdensity",
+  "ggalt", # for geom_encircle
+  "ggsflabel" # has repel labels for sf
+  )
+
+
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+# Packages loading
+invisible(lapply(packages, library, character.only = TRUE))
+
+tmap_mode("plot")
+rm(list=ls())
+```
+
+```{r, echo=FALSE}
+
+# avoid conflict with dplyr and MASS::select
+select <- dplyr::select
+
+```
+
+```{r, echo=FALSE}
+## Data
+
+### Sources
+
+#Import spatial data
+
+#UK constituency boundary polygons & UK constituency hexagons
+
+
+#| code-fold: false
+# this BUC version has ultra generalised (500m) polygons,
+# allowing for quick mapping
+# from: https://hub.arcgis.com/datasets/ons::westminster-parliamentary-constituencies-december-2021-uk-buc/explore?location=55.215744%2C-3.315966%2C6.71
+# click to download the geojson file
+
+uk_map_download <- st_read(
+  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/WPC_Dec_2019_UGCB_UK_2022/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson",
+  quiet = TRUE)
+
+# only need the boundaries and the IDs for merging with parlitools data
+uk<- uk_map_download |> 
+  select(pcon19cd,geometry) |> 
+  st_transform(crs=4326) |> 
+  st_make_valid() # ensure valid line overlaps etc
+
+# constituencies as hexagons
+hex <- west_hex_map
+
+```
+
+```{r, echo=FALSE}
+#Urban/rural categorisation of constituencies from House Of Commons Library
+
+
+#| code-fold: false
+# from: https://commonslibrary.parliament.uk/research-briefings/cbp-8322/
+# download: City & Town Classification of Parliamentary Constituencies - CSV data
+# at page: https://researchbriefings.files.parliament.uk/documents/CBP-8322/pcon-classification-csv.csv
+# saved on my computer as citytown
+
+# make extra column "rur_urb"
+# showing which urban/rural category has largest score for each constituency
+
+citytown <- read_csv("https://researchbriefings.files.parliament.uk/documents/CBP-8322/pcon-classification-csv.csv") |>
+  # citytown <- read.csv(here::here("data","citytown.csv")) |>
+  mutate(classification = 
+           replace(classification, 
+                   classification == 
+                     "Village or Smaller","Village or smaller")) |>
+  select(-population) |>
+  pivot_wider(names_from = classification,
+              values_from = percent_of_constituency, values_fill = 0) |>
+  mutate(rur_urb = pmap(across(3:9), ~ names(c(...)[which.max(c(...))])),
+         rur_urb = factor(rur_urb, levels = c("Village or smaller",
+                                                "Small Town",
+                                                "Medium Town",
+                                                "Large Town",
+                                                "Other City",
+                                                "Core City (outside London)",
+                                                "Core City (London)")))
+
+```
+
+```{r, echo=FALSE}
+#Census and election data
+
+
+#| code-fold: false
+# files are in parlitools package
+
+elect2019 <- bes_2019
+elect2017 <- bes_2017
+elect2015 <- bes_2015
+
+census <- census_11
+```
+
+```{r, echo=FALSE}
+#To produce: `all_elections_census_hex`
+
+#| code-fold: false
+all_elections_census_hex <- left_join(elect2019,
+                           census |> 
+                             select(-c("constituency_name", 
+                                       "country", 
+                                       "region", 
+                                       "constituency_type")), 
+                           by = "ons_const_id") |>
+  left_join(elect2017 |> select(ons_const_id, 
+                                 ends_with("_17")), by = "ons_const_id") |> 
+  left_join(elect2015 |> select(ons_const_id, 
+                                 ends_with("_15")), by = "ons_const_id") |> 
+  left_join(elect2015 |> select(ons_const_id, ends_with("_10")), 
+            by = "ons_const_id") |> 
+  left_join(hex |> select(-"constituency_name"), #  no letter case confusion
+            by = c("ons_const_id"="gss_code")) |>
+  select(-contains(c("_ppc_","alliance","dup","uup","sf","sdlp"))) |> # # NI 
+  select(ons_const_id, everything()) |> # pano as col 1 to match 2017 & 2015 structures
+  rename_at(
+    vars(ends_with(".x")),
+    ~str_replace(., "\\..$","")
+  ) |> 
+  select_at(
+        vars(-ends_with(".y"))
+  ) |> 
+st_as_sf()
+
+```
+
+```{r, echo=FALSE}
+#To produce: `all_elections_census_polygons`
+
+
+#| code-fold: false
+all_elections_census_polygons <- all_elections_census_hex |> 
+  st_drop_geometry() |> 
+  left_join(uk, by = c("ons_const_id" = "pcon19cd")) |> 
+  st_as_sf()
+
+```
+
+```{r, echo=FALSE}
+### Variables
+
+# To produce: `df` and `df_hex` for different styles of mapping
+# 
+# Will use `df` to construct models
+# 
+# Restrict data to just England and Wales.
+# 
+# Rename and agglomerate variables to be used from the census info.
+# 
+# The measure of Conservative swing from Labour used here is the **Butler swing**, calculated as\
+# **((con_19 - con_17) - (lab_19 - lab_17)) / 2**
+# 
+# $$
+# \begin{equation}
+# \textbf{2017-19 Swing} = \frac{\text{(con_19 - con_17)} - \text{(lab_19 - lab_17)}}{2}
+# \end{equation}
+# $$
+# 
+# ![](/Users/kevinhoran/Documents/R/SecondTermProject/Screenshot%202022-09-10%20at%2021.22.05.png){fig-align="center" height="40"}
+# 
+# where all variables in the numerator are percentages of the votes cast received by each party in a given year
+
+
+#| code-fold: false
+df <- all_elections_census_polygons |> 
+  filter(country %in% c("England","Wales")) |> 
+  mutate(competed_con = factor(ifelse(is.na(con_19-con_17),"No","Yes")),
+         competed_lab = factor(ifelse(is.na(lab_19-lab_17),"No","Yes"))) |> 
+  filter(competed_con == "Yes",
+         competed_lab ==  "Yes") |> # constits where cons and lab competed in 19 and 17
+  mutate(con_winner_19 = ifelse(winner_19 == "Conservative", "Con19", "NotCon19"),
+         con_winner_17 = ifelse(winner_17 == "Conservative", "Con17", "NotCon17"),
+         con_flip_1917 = ifelse(winner_19 == "Conservative" & winner_17 != "Conservative", "ConFlip", "NoConFlip"),
+         con_flip_lab =  ifelse(winner_19 == "Conservative" & winner_17 == "Labour", "ConLabFlip", "NoConLabFlip"),
+         over65 = age_65_to_74 + age_75_to_84 + age_85_to_89 + age_90_plus,
+         low_qual = qual_none + qual_level_1,
+         deprived = deprived_2 + deprived_3 + deprived_4,
+         student = economically_inactive_student,
+         leave_EU = leave_hanretty,
+         density = population_density,
+         born_elsewhere = born_ireland + born_other_eu + 
+           born_other_pre_2004_eu + born_post_2004_eu + born_other,
+         density = population_density, 
+         con_change = con_19 - con_17, # difference in %
+         lab_change = lab_19 - lab_17,
+         con_swing = (con_change - lab_change)/2, # Butler swing
+         #con_swing = (con_19/(con_19 + lab_19)) - (con_17/(con_17 + lab_17)) # Steed swing
+) |> 
+  left_join(citytown |> select(-constituency_name), 
+            by = c("ons_const_id" = "constituency_code"))
+
+df_hex <- df |> 
+  st_drop_geometry() |> 
+  left_join(all_elections_census_hex |> select(constituency_name, geometry)) |> 
+  st_as_sf()
+
+```
+
+```{r, echo=FALSE}
+#Make sf datasets of the outline polygons for England/Wales, regions, counties and London
+
+
+#| code-fold: false
+regions <- df |> group_by(region) |> 
+  summarise() |> 
+  st_as_sf()
+
+counties <- df |> group_by(county) |> 
+  summarise() |> 
+  st_as_sf()
+
+london <- regions |> filter(region=="London")
+
+gb <- df |> summarise() |> st_as_sf()
+```
+
+### Covariate correlations
+
+As is the case with many socio-economic indicators, it is important to understand that high degrees of correlation can prove problematic for modelling. The degree of correlation between the variables under consideration are shown below.
+
+```{r, fig.width=6, fig.height=6}
+#Check correlations
+
+
+
+M <- df |> 
+  select(con_19, # will be a dependent variable
+         con_swing, # will be a different dependent variable
+         over65, 
+         low_qual, 
+         deprived, 
+         student, 
+         #leave_EU, 
+         density, 
+         born_elsewhere) |> 
+  st_drop_geometry() |> 
+  cor()
+
+corrplot(M, method = 'square', addCoef.col = 'black',
+         cl.pos = 'n', col=COL2("RdYlBu"))
+
+```
+
+It is also interesting to examine the differences between the correlations of `con_19` and `con_swing` with the explanatory variables.
+
+For most of these, the correlation with `con_swing` is simply a milder version of that with `con_19.` This would be consistent with a situation where those who are changing their vote from Labour to Conservative, and thus causing the swing, are of a similar demographic and economic make-up to those who were already voting for the Conservatives. For `over65`, the drop is quite large, suggesting that most of those `over65` who would vote for the Conservatives were already doing so before 2019.
+
+The correlations with `low_qual` and `deprived`, however, show quite different behaviour. `low_qual` has essentially no correlation with `con_19` but is strongly positively correlated with `con_swing`. `deprived` has a strong negative correlation with `con_19` but an equivalently large positive correlation with `con_swing`.
+
+The processes behind these observations, and their consequences for the election outcome in 2019, are the subject of this study.
+
+As many are of the census covariates are highly correlated and liable to cause multicollinearity issues in regression modelling, it was decided to perform PCA and restrict the examination to the first two independent (by construction) components. This will also enable visual evaluation of potential walls on a two-dimensional principal component plane, while maintaining as much information as possible from all of the covariates.
+
+### PCA quadrants
+
+The following tables show that the first two components of the PCA contain 81% of the variation present in the covariates.
+
+`PC1` broadly represents `over65`, `density`, `students`, `born elsewhere` - a collection of demographic variables.
+
+`PC2` broadly represents `low qualifications`, `deprived` - variables associated with economic/educational situations.
+
+```{r}
+# calculate principal components
+pca_vars <- df |> select(
+  #con_19, 
+  #con_swing, 
+  over65, 
+  low_qual, 
+  deprived, 
+  student, 
+  density, 
+  born_elsewhere) |> 
+  st_drop_geometry()
+PCAresults <- prcomp(pca_vars, scale. = TRUE)
+
+# PCAimportance <- summary(PCAresults)$importance |> 
+#   as.data.frame() |> 
+#   round(3) |> 
+#   kable(caption = "Variance captured by PCA") |> 
+#   kable_paper(full_width = FALSE) |> 
+#   row_spec(3, bold = TRUE, font_size = 18) |> 
+#   row_spec(2, hline_after = TRUE,) |> 
+#   column_spec(2:3, bold = TRUE, background = "lightgrey")
+
+PCAimportance <- summary(PCAresults)$importance |> 
+  as.data.frame()
+
+PCAimportance
+
+# PCAcomposition <- round(PCAresults$rotation, 2) |> 
+#   as.data.frame() |> 
+#   mutate(PC1 = cell_spec(PC1, bold = TRUE, background=ifelse(PC1 > 0.4 | PC1 < -0.4, "darkgreen", "black")),
+#          PC2 = cell_spec(PC2, bold = TRUE, background=ifelse(PC2 > 0.4 | PC2 < -0.4, "darkgreen", "black"))) |>  
+#   kbl(caption = "Covariate behaviour in each PC", booktabs = T, linesep = "", escape=FALSE) |> 
+#     kable_paper(full_width = F) |> 
+#       column_spec(2:3, color = "white") |> 
+#   column_spec(1, bold = TRUE)
+
+PCAcomposition <- round(PCAresults$rotation, 2) |> 
+  as.data.frame()
+
+PCAcomposition
+```
+
+When these are displayed as a bi-plot, it is possible to think of each of these constituencies as living in one of four quadrants, divided according to differing demographic, economic and educational structures.
+
+```{r}
+df$PC1 <- PCAresults$x[,1]
+df$PC2 <- PCAresults$x[,2]
+df$PC3 <- PCAresults$x[,3]
+
+rotation <- as.data.frame(PCAresults$rotation) |> 
+  rownames_to_column() |> 
+  rename(variable = rowname)
+
+ggplot() + 
+  geom_point(data=df, aes(x=PC1, y=PC2), colour="grey") +
+  geom_segment(data=rotation, 
+               aes(x=0,y=0,xend=PC1*6,yend=PC2*6), 
+               colour="darkred", arrow=arrow(), size=2) + 
+  geom_label_repel(data=rotation,aes(x=PC1*6+0.2,y=PC2*6+0.5,label=variable),colour="black", fontface="bold") + 
+  geom_segment(data=rotation, 
+               aes(x=0,y=0,xend=PC1*-6,yend=PC2*-6), 
+               colour="darkgreen", arrow=arrow(), alpha=0.2) +
+  geom_label_repel(data=rotation,aes(x=PC1*-6+0.2,y=PC2*-6+0.2,label=paste0("(not) ",variable)),
+                   colour="black", fill="pink", alpha=0.4, fontface="bold") + 
+  xlim(-4,4) +
+  ylim(-5,5) + 
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") +
+  geom_label(aes(x=-2,y=2.5,label="TL"),size=8,fill="black",colour="white") + 
+  geom_label(aes(x=2,y=2.5,label="TR"),size=8,fill="black",colour="white") + 
+  geom_label(aes(x=-2,y=-2.5,label="BL"),size=8,fill="black",colour="white") + 
+  geom_label(aes(x=2,y=-2.5,label="BR"),size=8,fill="black",colour="white") +
+  labs(title = "PC1 and PC2 quadrants",
+       subtitle = "with associated loadings") + 
+  theme(panel.background = element_rect(fill = NA, color = "black",size = 2))
+```
+
+```{r}
+# quad_df <- tibble(
+#   Quadrant = c("Top-Left (TL)",
+#                "Top-Right (TR)",
+#                "Bottom-Left (BL)",
+#                "Bottom-Right (BR)"),
+#   Characteristics = c("older, low density, wealthy",
+#                       "younger, high density, high qualifications",
+#                       "older, low density, low qualifications",
+#                       "younger, high density, high deprived")
+# ) |> kbl(caption = "Covariates on a PC plane", booktabs = T) |> 
+#     kable_paper(full_width = F)  |> 
+#   column_spec(1, bold = TRUE)
+
+quad_df <- tibble(
+  Quadrant = c("Top-Left (TL)",
+               "Top-Right (TR)",
+               "Bottom-Left (BL)",
+               "Bottom-Right (BR)"),
+  Characteristics = c("older, low density, wealthy",
+                      "younger, high density, high qualifications",
+                      "older, low density, low qualifications",
+                      "younger, high density, high deprived")
+)
+
+quad_df
+```
+
+## Flips
+
+### 1. Global wall
+
+If a *wall* means anything in the electoral sense, it suggests something that is resistant to change, opposes movement. In this study, it is defined as a collection of constituencies which have been held consistently by one party in 2010, 2015 and 2017. Seats which match this description for either the Conservatives or Labour are shown on the maps below, comprising what will be referred to as blue and red walls respectively. These walls clearly, by this definition, do not contain seats which either party held temporarily during one or more of these parliamentary terms.
+
+An initial look at the blue and red walls suggests that Labour's red wall is quite small. From the map, we can see that the area covered by the Conservative wall is much larger than that of the Labour wall. However, all constituencies contain roughly the same size of population, and Labour tends to dominate in more densely populated small constituencies. Labour's red wall is concentrated around the `North East`, `North West`, `Yorkshire and the Humber`, `Wales`, and `London`. It can be seen from the hexagon maps, which show each constituency as having equal area, that each party has over 200 seats in its wall.
+
+```{r, fig.width=12, fig.height=6}
+
+bluewall_df <- df |> filter(winner_10 == "Conservative" &
+                    winner_15 == "Conservative" &
+                    winner_17 == "Conservative") |> 
+  mutate(wall = "blue")
+redwall_df <- df |> filter(winner_10 == "Labour" &
+                    winner_15 == "Labour" &
+                    winner_17 == "Labour") |> 
+  mutate(wall = "red")
+
+map_bluewall <- ggplot() + 
+  geom_sf(data = regions, fill=NA, lwd=0.5, colour="black") +
+  geom_sf(data = df, fill=NA, lwd=0.05) +
+  geom_sf(data = bluewall_df, fill="blue", lwd=0.1) + 
+  coord_sf(datum=NA) +
+  theme_bw() + 
+  labs(title = "Blue wall",
+       subtitle = paste0(nrow(bluewall_df)," constituencies"))
+
+map_redwall <- ggplot() + 
+  geom_sf(data = regions, fill=NA, lwd=0.5, colour="black") +
+  geom_sf(data = df, fill=NA, lwd=0.05) +
+  geom_sf(data = redwall_df, fill="darkred", lwd=0.1) + 
+  coord_sf(datum=NA) +
+  theme_bw() + 
+  labs(title = "Red wall",
+       subtitle = paste0(nrow(redwall_df)," constituencies"))
+
+map_bluewall_hex <- ggplot() + 
+  geom_sf(data = df_hex, lwd=0.1) + 
+  geom_sf(data = df_hex |> filter(winner_10 == "Conservative" &
+                    winner_15 == "Conservative" &
+                    winner_17 == "Conservative"), fill="blue",lwd=0.1) + 
+  coord_sf(datum=NA) +
+  theme_bw() + 
+  labs(title = "Blue wall (hex)",
+       subtitle = paste0(nrow(bluewall_df)," constituencies"))
+
+map_redwall_hex <- ggplot() + 
+  geom_sf(data = df_hex, lwd=0.1) + 
+  geom_sf(data = df_hex |> filter(winner_10 == "Labour" &
+                    winner_15 == "Labour" &
+                    winner_17 == "Labour"), fill="darkred",lwd=0.1) + 
+  coord_sf(datum=NA) +
+  theme_bw() + 
+  labs(title = "Red wall (hex)",
+       subtitle = paste0(nrow(redwall_df)," constituencies"))
+
+plot_grid(map_bluewall, map_redwall, map_bluewall_hex, map_redwall_hex, nrow = 1)
+
+```
+
+If thought of in this way, these *walls* can be visualised in terms of their demographic and economic characteristics by picturing them on the principal components plane which was described earlier.
+
+Let Labour's red wall be defined on the PC plane of first and second principal components, derived from the census, as the region described by a convex hull of the location of all of the seats which have been held by Labour continuously in 2017, 2015, and 2010. Note that these seats have been maintained by Labour despite their having failed to gain power in any of these elections. An analogous blue wall can be defined for the Conservative party.
+
+```{r}
+
+bluewall <- ggplot(bluewall_df, aes(PC1, PC2)) + 
+  geom_mark_hull(aes(fill = wall), concavity = 10) + 
+  geom_point(aes(colour=winner_17), size=1) +
+  scale_color_manual(values = "darkblue") + 
+  scale_fill_manual(values = "lightblue") + 
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  xlim(-3,6) + 
+  ylim(-5,4) + 
+  labs(title = "Blue Wall",
+       subtitle = "Conservative seats: 2010-2015-2017") +
+  geom_segment(data=rotation, 
+               aes(x=0,y=0,xend=PC1*6,yend=PC2*6), 
+               colour="darkgreen", arrow=arrow()) + 
+  geom_label_repel(data=rotation,aes(x=PC1*6+0.2,y=PC2*6+0.2,label=variable),colour="black") +
+  theme(legend.position="none")
+
+redwall <- ggplot(redwall_df, aes(PC1, PC2)) + 
+  geom_mark_hull(aes(fill = wall), concavity = 10) + 
+  geom_point(aes(colour=winner_17), size=1) +
+  scale_color_manual(values = "darkred") + 
+  scale_fill_manual(values = "pink") + 
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  xlim(-3,6) + 
+  ylim(-5,4) + 
+  labs(title = "Red Wall",
+       subtitle = "Labour seats: 2010-2015-2017") +
+  geom_segment(data=rotation, 
+               aes(x=0,y=0,xend=PC1*6,yend=PC2*6), 
+               colour="darkgreen", arrow=arrow()) + 
+  geom_label_repel(data=rotation,aes(x=PC1*6+0.2,y=PC2*6+0.2,label=variable),colour="black") +
+  theme(legend.position="none")
+
+plot_grid(bluewall, redwall)
+```
+
+```{r}
+
+bluewall_bin <- ggplot(bluewall_df, aes(PC1, PC2)) + 
+  geom_bin2d(bins=10) +
+  scale_fill_gradient2(low="white",mid="cyan",high="darkblue", midpoint=5) + 
+  geom_mark_hull(concavity = 10, colour="darkblue") + 
+  ylim(-5,4) + 
+  xlim(-3,6) + 
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  labs(title = "Blue Wall (flips in gold)",
+       subtitle = "Conservative concentration: 2010-2015-2017") +
+  geom_point(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+             aes(x=PC1,y=PC2), size=1, shape=21, fill="gold") +
+  theme(legend.position="bottom")
+
+redwall_bin <- ggplot(redwall_df, aes(PC1, PC2)) + 
+  geom_bin2d(bins=10) +
+  scale_fill_gradient2(low="white",mid="pink",high="darkred", midpoint=5) + 
+  geom_mark_hull(concavity = 10, colour="darkred") + 
+  ylim(-5,4) + 
+  xlim(-3,6) + 
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  labs(title = "Red Wall (flips in gold)",
+       subtitle = "Labour concentration: 2010-2015-2017") +
+  geom_point(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+             aes(x=PC1,y=PC2), size=1, shape=21, fill="gold") +
+  theme(legend.position="bottom")
+
+plot_grid(bluewall_bin, redwall_bin)
+
+```
+
+When we look at them together, in the diagram below, there is a large intersection area. This can be interpreted as some sort of electoral middle-ground where majorities are won and lost. The seats which flipped from Labour to the Conservatives in 2019 are shown in gold. It is clear that the vast majority of these flipped seats lie in the intersection area between the Blue Wall and the Red Wall. There is one extreme outlier, the constituency of Kensington, on the right of the diagram.
+
+```{r}
+
+walls_df  <-rbind(bluewall_df, 
+                  redwall_df) |> 
+  as.data.frame()
+
+walls <- ggplot(walls_df, aes(PC1, PC2)) + 
+  geom_mark_hull(aes(fill = wall), concavity = 10) + 
+  geom_point(aes(colour=winner_17), size=1) +
+  scale_color_manual(values = c("darkblue","darkred")) + 
+  scale_fill_manual(values = c("lightblue","pink")) + 
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  xlim(-3,6) + 
+  ylim(-5,4) + 
+  labs(title = "Blue and red walls",
+       subtitle = "2019 Conservative flips in gold") +
+  geom_segment(data=rotation, 
+               aes(x=0,y=0,xend=PC1*6,yend=PC2*6), 
+               colour="darkgreen", arrow=arrow()) + 
+  geom_label_repel(data=rotation,aes(x=PC1*6+0.2,y=PC2*6+0.2,label=variable),colour="black") +
+  geom_point(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+             aes(x=PC1,y=PC2), size=3, shape=21, fill="gold") +
+  theme(legend.position="none")
+
+walls
+
+```
+
+Separating the walls using quadratic discriminant analysis (QDA):
+
+```{r, echo=FALSE}
+
+m_qda <- qda(wall ~ PC1 + PC2, data = walls_df)
+pred_qda <- predict(m_qda)
+
+decisionplot_ggplot <- function(model, data, class = NULL, predict_type = "class",
+                         resolution = 100, showgrid = TRUE, ...) {
+  
+  if(!is.null(class)) cl <- data[,class] else cl <- 1
+  data <- data[,names(data)%in%c("PC1","PC2","PC3")]
+  cn <- colnames(data)
+  
+  k <- length(unique(cl))
+  
+  data$pch <- data$col <- as.integer(cl) + 1L
+  gg <- ggplot(aes_string(cn[1], cn[2]), data = data) + 
+    geom_point(aes_string(col = 'as.factor(col)', shape = 'as.factor(col)'), size = 3)
+  
+  # make grid
+  r <- sapply(data[, 1:2], range, na.rm = TRUE)
+  xs <- seq(r[1, 1], r[2, 1], length.out = resolution)
+  ys <- seq(r[1, 2], r[2, 2], length.out = resolution)
+  
+  g <- cbind(rep(xs, each = resolution), 
+             rep(ys, time = resolution))
+  colnames(g) <- colnames(r)
+  
+  g <- as.data.frame(g)
+  
+  ### guess how to get class labels from predict
+  ### (unfortunately not very consistent between models)
+  p <- predict(model, g, type = predict_type)
+  if(is.list(p)) p <- p$class
+  g$col <- g$pch <- as.integer(as.factor(p)) + 1L
+  
+  if(showgrid) 
+    gg <- gg + geom_point(aes_string(x = cn[1], y = cn[2], col = 'as.factor(col)'), data = g, shape = 20, size = 1) + 
+    scale_colour_manual(values = c("cyan","cyan","pink")) + 
+    guides(colour="none")
+  
+  gg + geom_contour(aes_string(x = cn[1], y = cn[2], z = 'col'), data = g, inherit.aes = FALSE)
+}
+
+decisionplot_ggplot(m_qda, walls_df, class = "wall") + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  labs(title = "Blue and red walls from QDA (>50% confidence)",
+       subtitle = "Actual flips: gold") +
+  geom_point(data=redwall_df, colour="darkred") + 
+  geom_point(data=bluewall_df, colour="darkblue") +
+  geom_point(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+             aes(x=PC1,y=PC2), size=3, shape=24, fill="orange") +
+  theme(legend.position="none") + 
+  theme_bw()
+
+```
+
+```{r}
+qda_df <- as.data.frame(pred_qda)
+walls_df$qdacolour <- case_when(qda_df$posterior.blue > 0.95 ~ ">95% Conservative",
+                            qda_df$posterior.blue < 0.05 ~ ">95% Labour",
+                            TRUE ~ "Other") 
+  
+ggplot(walls_df) + 
+  geom_point(aes(x=PC1,y=PC2,fill=qdacolour), shape=21, size=3) +
+  scale_fill_manual(values = c("darkblue","darkred","darkgrey")) + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  xlim(-3,6) + 
+  ylim(-5,4) + 
+  labs(title = "Blue and red walls from QDA (>95% confidence)",
+       subtitle = "Actual flips: orange") +
+  geom_segment(data=rotation, 
+               aes(x=0,y=0,xend=PC1*6,yend=PC2*6), 
+               colour="darkgreen", arrow=arrow()) + 
+  geom_label_repel(data=rotation,aes(x=PC1*6+0.2,y=PC2*6+0.2,label=variable),colour="black") +
+  geom_point(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+             aes(x=PC1,y=PC2), size=2, shape=24, fill="orange") +
+  theme(legend.position="none") + 
+  theme_bw()
+```
+
+#### Flips by quadrant
+
+The following shows in which PC quadrant these flips occurred.
+
+```{r, fig.height=4, fig.width=6}
+
+ggplot(df |> filter(con_flip_lab=="ConLabFlip"), 
+       aes(x=PC1,y=PC2,fill=region,label = constituency_name)) + 
+  geom_point(size=3, shape=21) +
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  scale_color_brewer(palette="Paired") + 
+  scale_fill_brewer(palette="Paired") + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  #geom_text_repel(size=2, aes(colour=rur_urb)) + 
+  labs(title = "Conservative flipped seats from Labour: 2019")
+
+```
+
+As Kensington is a strong outlier which distorts the plot, making it difficult to read, it is removed for the plot below, and the names of these flipped seats are shown, coloured according to their regional location.
+
+In terms of PC quadrants, most of the flips occurred in the bottom-left (BL) zone. However, all zones contain flipped seats.
+
+```{r}
+ggplot(df |> filter(con_flip_lab=="ConLabFlip" & constituency_name !="Kensington"), 
+       aes(x=PC1,y=PC2,fill=region,label = constituency_name)) + 
+  geom_point(size=3, shape=21) +
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  scale_fill_brewer(palette="Paired") + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") + 
+  geom_text_repel(size=2, colour="black") + 
+  labs(title = "Conservative flipped seats from Labour: 2019", 
+       subtitle = "Excluding extreme value (Kensington)")
+```
+
+#### Kensington outlier
+
+*Kensington seems like a particularly stark outlier.*
+
+*Kensington is a constituency in Greater London which first existed between 1974 and 1997 and was recreated in 2010. Since 2019, it has been represented in the House of Commons of the UK Parliament by Felicity Buchan of the Conservative Party.*
+
+*At the 2017 general election Emma Dent Coad gained the seat from incumbent Conservative Victoria Borwick by the slenderest margin in England, 20 votes, the first time Kensington had been represented by a Labour MP. Dent Coad was defeated by Buchan at the 2019 United Kingdom general election by the narrow margin of 150 votes.*
+
+*Just days after Dent Coad's election, the Grenfell Tower fire took place in her then constituency. On 16 June, she blamed the Kensington and Chelsea council for failings which led to the fire.*
+
+*Kensington is mostly residential --- housing varies between the expensive apartments with manicured garden squares or terraces of South Kensington, that has some of the most exclusive real estate in the world and, by contrast, North Kensington and Ladbroke Grove have, for the most part, dense social housing, tower blocks in output areas with high rankings in the 2000-compiled Index of Multiple Deprivation.*
+
+#### Beyond a global wall
+
+The description above of global walls may not capture the subtleties of electoral behaviour adequately. While a certain set of economic and demographic components may be associated with higher levels of Conservative or Labour votes in one region of England and Wales, they might be associated with different outcomes in other regions. Similarly, there may be different associations when these PC components are grouped by degree of peripherality (position on the rural-urban spectrum).
+
+To examine this, different red and blue walls are shown below. They keep the same definition of a wall but apply the construction of convex hulls separately for each category of constituency in terms of its rural-urban make-up, or its region.
+
+### 2. Periphery-core walls
+
+The walls below are constructed according to each of the seven categories from `village or smaller` to `core city (London)`.
+
+```{r, fig.height=8, fig.width=12}
+ggplot(df |> filter(winner_10 == "Labour" &
+                    winner_15 == "Labour" &
+                    winner_17 == "Labour"),
+       aes(x=PC1,y=PC2)) + 
+  geom_encircle(fill="pink", alpha=0.4) + 
+  geom_encircle(data = df |> filter(winner_10 == "Conservative" & 
+                                      winner_15 == "Conservative" & 
+                                      winner_17 == "Conservative"),
+       aes(x=PC1,y=PC2), fill="lightblue", alpha=0.4) +
+  geom_point(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+             aes(x=PC1,y=PC2, fill=region), size=4, shape=21, alpha=1) + 
+  geom_text_repel(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+                  aes(label=constituency_name), size=2.5) +
+  scale_fill_brewer(palette = "Paired") +
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") +
+  theme(legend.position = "bottom") +
+  labs(title = "Red & Blue Walls on rural-urban spectrum",
+       subtitle = "Conservative flips coloured by region") +
+  facet_wrap(~rur_urb, ncol = 4, scales = "free")
+```
+
+Almost all seats flipped in a `rur_urb` red wall context (not overlapping with a blue wall) were in the `West Midlands`, predominantly in `medium` and `large towns`, and `other (non-core) cities`
+
+Most of the out of blue wall flips were in large towns and non-core cities in the `West Midlands`.
+
+### 3. Regional walls
+
+The same process is repeated below but, this time, walls are constructed by region.
+
+```{r, fig.height=8, fig.width=12}
+ggplot(df |> filter(winner_10 == "Labour" &
+                    winner_15 == "Labour" &
+                    winner_17 == "Labour"),
+       aes(x=PC1,y=PC2)) + 
+  geom_encircle(fill="pink", alpha=0.4) + 
+  geom_encircle(data = df |> filter(winner_10 == "Conservative" & 
+                                      winner_15 == "Conservative" & 
+                                      winner_17 == "Conservative"),
+       aes(x=PC1,y=PC2), fill="lightblue", alpha=0.4) +
+  geom_point(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+             aes(x=PC1,y=PC2, fill=rur_urb), size=4, shape=21, alpha=1) + 
+  geom_text_repel(data=df |> filter(con_flip_lab == "ConLabFlip"), 
+                  aes(label=constituency_name), size=2.5) +
+  scale_fill_brewer(palette = "Paired") +
+  theme_bw() + 
+  geom_vline(xintercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  labs(x="PC1 ('demographics')",
+       y="PC2 ('economics')") +
+  theme(legend.position = "bottom") +
+  labs(title = "Red & Blue Walls by region",
+       subtitle = "Conservative flips coloured by rur_urb") +
+  facet_wrap(~region, ncol = 4, scales = "free")
+```
+
+When looking at **regional red walls**, there are many more flips occurring outside of the intersection areas with the blue wall. This especially occurred in the `North East`, `North West`, `Wales`, `West Midlands`, and `Yorkshire and the Humber`.
+
+The flips which occurred in the `East` were never part of the local red wall, while those that changed hands in the `East Midlands` were very much in a PC-space well-populated by Conservative blue wall seats.
+
+Perhaps the above is the starkest view so far of how poorly Labour performed relative to the Conservatives in the 2019 election among their core electorate. It shows outside-of-intersection flips occurring in many large towns in `Yorkshire and the Humber`, `non-core cities` in the `West Midlands`, and a cross-section of categories in `Wales` and the `North West`. In the `North East`, all of the many flips occurred in a space not at all contiguous with traditional conservative seats in that region.
+
+```{r, echo=FALSE}
+### Shift in mean placement
+
+# Global shift
+
+# mean_pc_df17 <- df |> 
+#   filter(winner_17 == "Conservative" | winner_17 == "Labour") |> 
+#   group_by(winner_17) |> 
+#   summarise(meanPC1 = mean(PC1),
+#             meanPC2 = mean(PC2)) |> 
+#   st_drop_geometry() |> 
+#   mutate(year = 2017) |> 
+#   rename(winner = winner_17)
+# 
+# mean_pc_df19 <- df |> 
+#   filter(winner_19 == "Conservative" | winner_19 == "Labour") |> 
+#   group_by(winner_19) |> 
+#   summarise(meanPC1 = mean(PC1),
+#             meanPC2 = mean(PC2)) |> 
+#   st_drop_geometry() |> 
+#   mutate(year = 2019) |> 
+#   rename(winner = winner_19)
+# 
+# mean_pc_df <- as.data.frame(rbind(mean_pc_df17, mean_pc_df19)) |> 
+#   mutate(fill = factor(paste0(winner,year)),
+#          group = c(1,2,1,2))
+# 
+# ggplot(mean_pc_df,aes(x=meanPC1, y=meanPC2)) + 
+#   geom_line(aes(group=group),colour="goldenrod2",arrow = arrow(type="closed",length = unit(0.4,"cm"))) +
+#   geom_point(aes(fill=fill),size=6, shape=21) + 
+#   scale_fill_manual(values = c("cyan","darkblue","pink","red")) + 
+#   geom_vline(xintercept = 0) + 
+#   geom_hline(yintercept = 0) + 
+#   labs(x="PC1 ('demographics')",
+#        y="PC2 ('economics')") + 
+#   theme_bw() + 
+#   xlim(-1,1.75) + 
+#   ylim(-1,0.75) +
+#   geom_segment(data=rotation, 
+#                aes(x=0,y=0,xend=PC1,yend=PC2), 
+#                colour="darkgreen", arrow=arrow()) + 
+#   geom_label_repel(data=rotation,aes(x=PC1,y=PC2+0.05,label=variable),colour="black", size=3) +
+#   labs(title = "Shift in average PC position: 2017-19",
+#        subtitle = "Conservative and Labour seats")
+
+```
+
+```{r, echo=FALSE}
+
+# Shift by rur_urb for Conservatives
+
+# mean_pc_df17 <- df |> 
+#   group_by(rur_urb, winner_17) |> 
+#   summarise(meanPC1 = mean(PC1),
+#             meanPC2 = mean(PC2),
+#             sdPC1 = sd(PC1),
+#             sdPC2 = sd(PC2)) |> 
+#   st_drop_geometry() |> 
+#   mutate(winner = paste0(winner_17,"2017")) |> 
+#   filter(winner_17 %in% c("Conservative","Labour"))
+# 
+# mean_pc_df19 <- df |> 
+#   group_by(rur_urb, winner_19) |> 
+#   summarise(meanPC1 = mean(PC1),
+#             meanPC2 = mean(PC2),
+#             meandiff = meanPC1-meanPC2,
+#             sd_meandiff = sd(meanPC1-meanPC2)) |> 
+#   st_drop_geometry() |> 
+#   mutate(winner = paste0(winner_19,"2019")) |> 
+#   filter(winner_19 %in% c("Conservative","Labour"))
+# 
+# mean_pc_df <- as.data.frame(rbind(mean_pc_df17, mean_pc_df19)) |> 
+#   mutate(winner = factor(winner, levels = c("Conservative2017","Conservative2019","Labour2017","Labour2019")))
+# mean2017 <- mean_pc_df[1:14,] |> 
+#   filter(winner_17 == "Conservative") |> 
+#   select(rur_urb,meanPC1,meanPC2,sdPC1,sdPC2) |> 
+#   rename(meanPC1_2017 = meanPC1,
+#          meanPC2_2017 = meanPC2,
+#          sdPC1_2017 = sdPC1,
+#          sdPC2_2017 = sdPC2)
+# 
+# mean2019 <- mean_pc_df[15:28,] |> 
+#   filter(winner_19 == "Conservative") |> 
+#   select(rur_urb,meanPC1,meanPC2,sdPC1,sdPC2) |> 
+#   rename(meanPC1_2019 = meanPC1,
+#          meanPC2_2019 = meanPC2,
+#          sdPC1_2019 = sdPC1,
+#          sdPC2_2019 = sdPC2)
+# 
+# con_moves <- left_join(mean2017, mean2019, by = "rur_urb") |> 
+#   mutate(changePC1 = round(meanPC1_2019 - meanPC1_2017,2),
+#          changePC2 = round(meanPC2_2019 - meanPC2_2017,2))
+# 
+# pc1plot <- ggplot(con_moves, aes(x=rur_urb, y=changePC1)) +
+#   geom_segment( aes(x=rur_urb, xend=rur_urb, y=0, yend=changePC1), color="dodgerblue") +
+#   geom_point( fill="darkblue", size=4, alpha=1, shape=21) +
+#   coord_flip() +
+#   theme_bw() +
+#   labs(title = "PC1 shift", 
+#        subtitle = "Conservatives 2017-19")
+# 
+# pc2plot <- ggplot(con_moves, aes(x=rur_urb, y=changePC2)) +
+#   geom_segment( aes(x=rur_urb, xend=rur_urb, y=0, yend=changePC2), color="dodgerblue") +
+#   geom_point( fill="darkblue", size=4, alpha=1, shape=21) +
+#   #coord_flip() +
+#   theme_bw() +
+#   labs(title = "PC2 shift", 
+#        subtitle = "Conservatives 2017-19") +
+#   scale_x_discrete(guide = guide_axis(n.dodge = 1,angle = 30))
+# 
+# plot_grid(pc1plot, pc2plot)
+
+```
+
+```{r, fig.width=8, fig.height=6, echo=FALSE}
+# ggplot() + 
+#   geom_point(data=df |> filter(winner_17 == "Labour" & rur_urb != "Core City (London)" & winner_19 == "Labour"),
+#              aes(x=PC1,y=PC2), colour="red", size=0.6, alpha=1) +
+#   geom_point(data=df |> filter(winner_17 == "Conservative" & rur_urb != "Core City (London)" & winner_19 == "Conservative"),
+#              aes(x=PC1,y=PC2), colour="blue", size=0.6, alpha=1) +
+#   geom_point(data=df |> filter(con_flip_lab=="ConLabFlip" & constituency_name !="Kensington"), 
+#        aes(x=PC1,y=PC2,label = constituency_name),
+#        size=3, shape=21, fill = "goldenrod2", alpha=1) +
+#   geom_text_repel(data=df |> filter(con_flip_lab=="ConLabFlip" & constituency_name !="Kensington"), 
+#        aes(x=PC1,y=PC2,label = constituency_name),size=3, colour="slategray") +
+#   theme_bw() + 
+#   geom_vline(xintercept = 0, colour="black") + 
+#   geom_hline(yintercept = 0, colour="black") + 
+#   labs(x="PC1 ('demographics')",
+#        y="PC2 ('economics')") + 
+#   facet_wrap(~rur_urb) + 
+#   theme(legend.position = "none") + 
+#   xlim(-2,6) + 
+#   ylim(-4,2) +
+#   labs(title = "Conservative flipped seats from Labour: 2019")
+```
+
+```{r, fig.width=8, fig.height=6, echo=FALSE}
+# ggplot() + 
+#   geom_point(data=df |> filter(winner_17 == "Labour" & rur_urb != "Core City (London)" & winner_19 == "Labour"),
+#              aes(x=PC1,y=PC2), colour="red", size=0.6, alpha=1) +
+#   geom_encircle(data=df |> filter(winner_17 == "Labour" & rur_urb != "Core City (London)" & winner_19 == "Labour"),
+#              aes(x=PC1,y=PC2), fill="pink", alpha=0.4) +
+#   geom_point(data=df |> filter(winner_17 == "Conservative" & rur_urb != "Core City (London)" & winner_19 == "Conservative"),
+#              aes(x=PC1,y=PC2), colour="blue", size=0.6, alpha=1) +
+#   geom_encircle(data=df |> filter(winner_17 == "Conservative" & rur_urb != "Core City (London)" & winner_19 == "Conservative"),
+#              aes(x=PC1,y=PC2), fill="lightblue", alpha=0.4) +
+#   geom_point(data=df |> filter(con_flip_lab=="ConLabFlip" & constituency_name !="Kensington"), 
+#        aes(x=PC1,y=PC2,label = constituency_name),
+#        size=3, shape=21, fill = "goldenrod2", alpha=1) +
+#   # geom_text_repel(data=df |> filter(con_flip_lab=="ConLabFlip" & constituency_name !="Kensington"), 
+#   #      aes(x=PC1,y=PC2,label = constituency_name),size=3, colour="slategray") +
+#   theme_bw() + 
+#   geom_vline(xintercept = 0, colour="black") + 
+#   geom_hline(yintercept = 0, colour="black") + 
+#   labs(x="PC1 ('demographics')",
+#        y="PC2 ('economics')") + 
+#   facet_wrap(~rur_urb) + 
+#   theme(legend.position = "none") + 
+#   xlim(-2,6) + 
+#   ylim(-4,2) +
+#   labs(title = "Conservative flipped seats from Labour: 2019")
+```
+
+```{r, echo=FALSE}
+# df_temp <- df |> 
+#   filter(winner_19 == "Conservative" | winner_19 == "Labour",
+#          winner_17 == "Conservative" | winner_17 == "Labour") |> 
+#   select(constituency_name,rur_urb,region,PC1,PC2,winner_17,winner_19,con_flip_lab) |> 
+#   mutate(quadrant = factor(ifelse(PC1<0 & PC2>0, "TL",
+#                            ifelse(PC1<0 & PC2<0, "BL",
+#                                   ifelse(PC1>0 & PC2>0, "TR","BR"))),
+#                            levels = c("TL","TR","BL","BR"))) |> 
+#   group_by(winner_17,winner_19,rur_urb,region) |> 
+#   count(quadrant) |> 
+#   ungroup()
+# df_temp1 <- df_temp |> 
+#   mutate(outcome = case_when(winner_17==winner_19 & winner_19 == "Conservative" ~ "ConHold",
+#                              winner_17==winner_19 & winner_19 == "Labour" ~ "LabHold",
+#                              winner_17=="Conservative" & winner_19 == "Labour" ~ "LabFlip",
+#                              winner_17=="Labour" & winner_19 == "Conservative" ~ "ConFlip"))
+# df_temp2 <- df_temp1 |> 
+#   #filter(quadrant == "TL") |> 
+#   st_drop_geometry() |> 
+#   select(-winner_17,-winner_19) |> 
+#   pivot_wider(names_from = outcome, values_from = n) |> 
+#   mutate_all(~replace(., is.na(.), 0)) |> 
+#   mutate(pc_con17 = 100*(ConHold + LabFlip) / (ConHold + LabFlip + ConFlip + LabHold),
+#          pc_con19 = 100*(ConHold + ConFlip) / (ConHold + LabFlip + ConFlip + LabHold),
+#          change_pc = pc_con19 - pc_con17)
+# 
+# quadrants_plots <- list()
+# for (i in 1:length(levels(df$region))) {
+# quadrants_plots[[i]] <- ggplot(df_temp2 |> filter(region == levels(region)[i])) +
+#   geom_segment( aes(x=rur_urb, xend=rur_urb, y=pc_con17, yend=pc_con19-2),
+#                 color="blue", lwd=2, arrow = arrow(length = unit(0.2,"cm"))) +
+#   geom_segment( aes(x=rur_urb, xend=rur_urb, y=0, yend=pc_con17), color="dodgerblue", lwd=1) + 
+#   geom_segment( aes(x=rur_urb, xend=rur_urb, y=pc_con19, yend=100), color="darkred", lwd=1) + 
+#   geom_point( aes(x=rur_urb, y=pc_con17), fill="cyan", size=3, shape=21) +
+#   geom_point( aes(x=rur_urb, y=pc_con19), fill="darkblue", size=3, shape=21) +
+#   coord_flip()+
+#   theme_bw() + 
+#   geom_hline(yintercept = 50, colour="black", linetype = "dashed")+
+#   xlab("") +
+#   ylab("% of seats") + 
+#   facet_wrap(~quadrant, ncol = 2) + 
+#   labs(title = levels(df$region)[i],
+#        subtitle = "% Conservative seats per PC quadrant\nChange from 2017-19")
+# }
+# plot_grid(quadrants_plots[[5]], quadrants_plots[[4]])
+# plot_grid(quadrants_plots[[9]], quadrants_plots[[2]])
+# plot_grid(quadrants_plots[[1]], quadrants_plots[[10]])
+# plot_grid(quadrants_plots[[7]], quadrants_plots[[8]])
+# plot_grid(quadrants_plots[[3]], quadrants_plots[[6]])
+
+```
+
+### Proportional Dominance Quadrants
+
+Beyond counting the number of flipped seats, the degree of collapse of Labour's red wall can be viewed by examining the percentage of seats won by the Conservatives in each `region`, `rur_urb` category, and `PC quadrant`, and how this changed in the 2019 election. The plots below show these movements, and the size of the movement in each category is shown by the blue arrows. Only seats which were held in 2017 by Labour or the Conservatives are included in the construction of these measures.
+
+```{r, fig.width=12, fig.height=12}
+df_temp <- df |> 
+  filter(winner_19 == "Conservative" | winner_19 == "Labour",
+         winner_17 == "Conservative" | winner_17 == "Labour") |> 
+  select(constituency_name,rur_urb,region,PC1,PC2,winner_17,winner_19,con_flip_lab) |> 
+  mutate(quadrant = factor(ifelse(PC1<0 & PC2>0, "TL",
+                           ifelse(PC1<0 & PC2<0, "BL",
+                                  ifelse(PC1>0 & PC2>0, "TR","BR"))),
+                           levels = c("TL","TR","BL","BR"))) |> 
+  group_by(winner_17,winner_19,rur_urb,region) |> 
+  count(quadrant) |> 
+  ungroup()
+df_temp1 <- df_temp |> 
+  mutate(outcome = case_when(winner_17==winner_19 & winner_19 == "Conservative" ~ "ConHold",
+                             winner_17==winner_19 & winner_19 == "Labour" ~ "LabHold",
+                             winner_17=="Conservative" & winner_19 == "Labour" ~ "LabFlip",
+                             winner_17=="Labour" & winner_19 == "Conservative" ~ "ConFlip"))
+df_temp2 <- df_temp1 |> 
+  #filter(quadrant == "TL") |> 
+  st_drop_geometry() |> 
+  select(-winner_17,-winner_19) |> 
+  pivot_wider(names_from = outcome, values_from = n) |> 
+  mutate_all(~replace(., is.na(.), 0)) |> 
+  mutate(pc_con17 = 100*(ConHold + LabFlip) / (ConHold + LabFlip + ConFlip + LabHold),
+         pc_con19 = 100*(ConHold + ConFlip) / (ConHold + LabFlip + ConFlip + LabHold),
+         change_pc = pc_con19 - pc_con17)
+
+quadrants_plots <- list()
+
+for (i in 1:length(levels(df$rur_urb))) {
+  quadrants_plots[[i]] <- ggplot(df_temp2 |> filter(rur_urb == levels(rur_urb)[i])) +
+    geom_segment( aes(x=region, xend=region, y=pc_con17, yend=pc_con19-2),
+                  color="blue", lwd=2, arrow = arrow(length = unit(0.2,"cm"))) +
+    geom_segment( aes(x=region, xend=region, y=0, yend=pc_con17), color="pink", lwd=1) + 
+    geom_segment( aes(x=region, xend=region, y=pc_con19, yend=100), color="pink", lwd=1) + 
+    geom_point( aes(x=region, y=pc_con17), fill="white", size=3, shape=21) +
+    geom_point( aes(x=region, y=pc_con19), fill="black", size=3, shape=21) +
+    coord_flip()+
+    theme_bw() + 
+    geom_hline(yintercept = 50, colour="black", linetype = "dashed")+
+    xlab("") +
+    ylab("% of seats") + 
+    facet_wrap(~quadrant, ncol = 2) + 
+    labs(title = levels(df$rur_urb)[i],
+         subtitle = "% Conservative seats per PC quadrant\nChange from 2017-19") + 
+    theme(panel.background = element_rect(fill = NA, color = "black",size = 1.5))
+}
+
+plot_grid(quadrants_plots[[1]], quadrants_plots[[2]],quadrants_plots[[3]], quadrants_plots[[4]], quadrants_plots[[5]], quadrants_plots[[6]], ncol = 2,nrow=3)
+
+```
+
+These charts show, for example, that in `villages or smaller`, the Conservatives already had complete dominance in the TL quadrant. In the TR zone, with higher qualification levels and a younger population, they attained 100% dominance in `Wales`, and close to that in the `North East`.
+
+The BR quadrant is the furthest from the blue wall. Here, they made large proportional gains in `medium` and `large towns`, in addition to `non-core` and `core cites`, in the `West Midlands`. Large gains also occurred in this quadrant in `large towns` in the `East`and the `West Midlands`, and in `non-core cities` in the `North West` and `West Midlands`.
+
+Overall, most of the proportional increase in Conservative seats relative to Labour occurred in `medium` and `large towns` (broadly across regions and PC quadrant), followed by `non-core cities` in the `Midlands` and `North West`. `London` has been omitted as its only flip was Kensington.
+
+```{r, echo=FALSE}
+# ggplot() + 
+#   geom_segment(data=rotation, 
+#                aes(x=0,y=0,xend=PC1*6,yend=PC2*6), 
+#                colour="darkred", arrow=arrow(), size=2) + 
+#   geom_label_repel(data=rotation,aes(x=PC1*6+0.2,y=PC2*6+0.5,label=variable),colour="black", fontface="bold") + 
+#   geom_segment(data=rotation, 
+#                aes(x=0,y=0,xend=PC1*-6,yend=PC2*-6), 
+#                colour="darkgreen", arrow=arrow(), alpha=0.2) +
+#   xlim(-4,4) +
+#   #ylim(-4,3) + 
+#   theme_bw() + 
+#   geom_vline(xintercept = 0, size = 2) + 
+#   geom_hline(yintercept = 0, size = 2) + 
+#   labs(x="PC1 ('demographics')",
+#        y="PC2 ('economics')") +
+#   geom_label(aes(x=-2,y=2.5,label="TL"),size=8,fill="black",colour="white") + 
+#   geom_label(aes(x=2,y=2.5,label="TR"),size=8,fill="black",colour="white") + 
+#   geom_label(aes(x=-2,y=-2.5,label="BL"),size=8,fill="black",colour="white") + 
+#   geom_label(aes(x=2,y=-2.5,label="BR"),size=8,fill="black",colour="white") +
+#   labs(title = "PC1 and PC2 quadrants",
+#        subtitle = "with associated loadings") + 
+#   theme(panel.background = element_rect(fill = NA, color = "black",size = 2))
+```
+
+### Geography
+
+Finally, in terms of flips, geography is explicitly introduced below by showing these flipped seats in their spatial positions, coloured according to the quadrant in which they lie. It shows that the types of flips which occurred are somewhat grouped, displaying a spatial relationship. This is developed further in the next section where the swing itself from Labour to Conservative, rather than simply whether or not it led to a seat flip, is modelled. These models will explicitly feature spatial structure, and its contribution to the process.
+
+```{r, fig.width=10, fig.height=10}
+dfx <- df |> mutate(quadrant = factor(ifelse(PC1<0 & PC2>0, "TL",
+                           ifelse(PC1<0 & PC2<0, "BL",
+                                  ifelse(PC1>0 & PC2>0, "TR","BR"))),
+                           levels = c("TL","TR","BL","BR")))
+
+ggplot() + 
+  geom_sf(data=df, lwd=0.1) +
+  geom_sf(data=regions, lwd=1, fill=NA) + 
+  geom_sf(data=dfx |> filter(con_flip_lab == "ConLabFlip"), 
+          aes(fill=quadrant,label=constituency_name), colour="black", lwd=0.25) + 
+  geom_sf_label_repel(data=dfx |> filter(con_flip_lab == "ConLabFlip"), 
+          aes(label=constituency_name, colour=quadrant), fill="white",
+                        force = 100, nudge_x = -2, seed = 10, size=2, fontface="bold", segment.colour="grey", alpha=1) + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2") +
+  guides(colour="none") + 
+  theme_bw() + 
+  labs(title = "Conservative gains from Labour 2019",
+       subtitle = "Coloured by quadrant of PC1 and PC2 plot") +
+  theme(legend.position = "right")
+
+```
+
+## Swings
+
+The flipping of seats from Labour to Conservative is a simplified, binary way of looking at the deterioration in Labour's performance in the 2019 election. Whether or not a flip occurs is not only influenced by the demographic and economic make-up of a constituency, its urban-rural structure, and the region where it is located. It also depends on how large the difference was between Labour and Conservative votes in the previous election. It is possible to win a huge number of extra votes in a constituency but still not flip a seat, or to increase vote-share by a very meagre amount in order to overcome a slim majority.
+
+The table below shows that only four of the highest ten constituency swings resulted in a flipped seat. This would imply that examining the swings is more informative than merely looking at the flips to understand the poor Labour performance.
+
+```{r}
+# df |> 
+#   select(constituency_name,region,rur_urb,con_swing,con_flip_1917) |> 
+#   arrange(desc(con_swing)) |> 
+#   mutate(swing_rank = seq_along(1:nrow(df)),
+#          con_swing = paste0(round(con_swing,2),"%")) |> 
+#   head(10) |> 
+#   st_drop_geometry() |> 
+#   kbl(caption = "Constituencies with 10 highest Conservative to Labour swings", booktabs = T) |> 
+#     kable_paper(full_width = F) |> 
+#   column_spec(c(1,4), bold = TRUE) |> 
+#   row_spec(c(1,2,4,6), background = "lightblue", col = "black") |> 
+#   row_spec(c(3,5,7:10), background = "pink", col = "black")
+
+df |> 
+  select(constituency_name,region,rur_urb,con_swing,con_flip_1917) |> 
+  arrange(desc(con_swing)) |> 
+  mutate(swing_rank = seq_along(1:nrow(df)),
+         con_swing = paste0(round(con_swing,2),"%")) |> 
+  head(10)
+```
+
+The *swing*, as described in the introduction, is a measure of the difference between the change in the Conservative vote from one election to the next, and the corresponding change for Labour. The different levels of swing across England and Wales can be modelled as a function of the PC variables, as before, but the modelling can also take into account geographic factors and the peripherality measure captured in the `rur_urb` category.
+
+Firstly, a neighbourhood weights matrix is defined, for use in the geo-spatial part of the model. This matrix defines a constituency as being a contiguous neighbour to another if they share at least one point on their boundaries. Some slight adjustments need to be made to allow islands to participate in the structure. This is achieved by introducing a buffer of 6km on boundary lines, which is adequate to cover the distance across the Solent to the Isle of Wight.
+
+```{r}
+df |> st_intersects() |> 
+  map_int(~length(.x)) %>% {
+    which(. == 1)} -> temp
+bufs <- rep(0,nrow(df))
+bufs[temp] <- 6000 # just enough to give Isle of Wight neighbours
+nlistconst <- df |> st_buffer(dist=bufs) |> 
+  st_intersects() |> imap(~setdiff(.x,.y))
+names(nlistconst) <- df$constituency_name
+
+df$constituency_name <- factor(df$constituency_name)
+```
+
+```{r, fig.width=8, fig.height=8}
+df_nb <- as_Spatial(df)
+
+swing.nb <- poly2nb(df |> st_buffer(dist=2000))
+plot(df_nb, border="black")
+plot(swing.nb, df_nb, add = TRUE, pch = ".", col = "red")
+title(main = "England & Wales", sub = "Neighbourhood structure")
+```
+
+```{r}
+lon <- df  |> 
+  filter(region == "London") |> 
+  as_Spatial()
+swing.nb2 <- poly2nb(lon)
+plot(lon, border="grey")
+plot(swing.nb2, lon, add = TRUE, pch = ".", col = "red")
+title(main = "London", sub = "Neighbourhood structure\n(excluding links to neighbours outside of London)")
+```
+
+### Exploratory Analysis
+
+Looking at the map of the `con_swing` variable, it is clear that the results of the 2019 election strongly favoured the Conservatives compared to Labour, relative to the 2017 outcome. It is reflective of some of the patterns seen previously when looking at flipped seats. The highest swings are in areas of the `North East`, `North West`, `Yorkshire and the Humber`, `East Midlands`, `West Midlands`, `Wales`, and parts of `London`. There are areas with generally low or negative swings scattered throughout these regions too.
+
+```{r}
+tmap_mode("plot")
+
+# make separate London map in addition to full map
+maplondon <- tm_shape(df |> filter(region == "London")) + 
+  tm_polygons("con_swing", lwd=0.5, palette="RdBu", id="constituency_name", breaks = seq(-6,18,by=1)) + 
+  tm_layout(legend.show=FALSE)
+
+mapgb <- tm_shape(df) + 
+  tm_fill(col="con_swing", style='cont', palette="RdBu", id="constituency_name") + 
+  tm_borders(lwd=0.1) + 
+  tm_shape(regions) + tm_borders(lwd=1)
+
+# combine them
+mapgb
+print(maplondon, vp = grid::viewport(0.86, 0.24, width = 0.2, height = 0.45))
+```
+
+It is clear from a visual inspection that there is spatial autocorrelation at play. This is confirmed by calculating the global Moran's-I statistic, as shown below.
+
+```{r}
+df_nb <- poly2nb(df)
+df_wts <- nb2listw(df_nb, zero.policy = TRUE)
+
+df_moran <- moran.test(df$con_swing, df_wts, zero.policy = TRUE)
+
+moran.plot(df$con_swing, 
+           df_wts, 
+           zero.policy = TRUE,
+           ylab = "Lagged con_swing", 
+           xlab = "con_swing",
+           col = "#6E0000", cex = .8, pch = 16,
+           xlim=c(-10, 20), ylim=c(-2,14))
+title(main = paste0("Moran's I = ", 
+               round(df_moran$estimate[1], digits = 3)))
+
+```
+
+By looking closer and calculating a local Moran's-I for each constituency (LISA analysis), a number of significant hot-spots and cold-spots can be identified. These are mapped below. Hot-spots are areas of high swing which are surrounded by areas of high swing, and cold-spots are the equivalent but with low swing.
+
+```{r, fig.width=12, fig.height=6}
+
+# create weights object
+queen_w <- queen_weights(df)
+
+# calculate LISA as per GEODA
+lisa <- local_moran(queen_w, df["con_swing"]) # or any other variable :)
+
+# process results
+df$cluster <- as.factor(lisa$GetClusterIndicators())
+levels(df$cluster) <- lisa$GetLabels()
+
+# A visual overview
+lisagb <- ggplot() + 
+  geom_sf(data=gb, lwd=1) +
+  geom_sf(data = df, aes(fill = cluster), lwd=0.05, colour="black") + 
+  geom_sf(data = regions, lwd = 0.5, fill=NA) + 
+  #geom_sf_label_repel(data = regions, aes(label=region),size=2, fontface="bold") + 
+  scale_fill_manual(values = c("white","darkred","darkblue","lightblue","pink","grey")) + 
+  labs(title = "LISA plot: con_swing",
+       subtitle = "Local indicators of spatial autocorrelation") + 
+  theme_bw()
+
+lisalondon <- ggplot() + 
+  geom_sf(data = london, lwd=1) +
+  geom_sf(data = df |> filter(region =="London"), aes(fill = cluster), lwd=0.1, colour="black") + 
+  scale_fill_manual(values = c("white","darkblue","pink")) + 
+  labs(title = "London") + 
+  theme_bw()
+
+plot_grid(lisagb, lisalondon, rel_widths = c(2,1))
+```
+
+Equivalent LISA plots are shown below for the covariates PC1 and PC2.
+
+```{r, fig.width=10, fig.height=5}
+
+lisa <- local_moran(queen_w, df["PC1"]) # or any other variable :)
+
+# process results
+df$cluster <- as.factor(lisa$GetClusterIndicators())
+levels(df$cluster) <- lisa$GetLabels()
+
+# A visual overview
+lisaPC1 <- ggplot() + 
+  geom_sf(data=gb, lwd=0.8) +
+  geom_sf(data = df, aes(fill = cluster), lwd=0.05, colour="black") + 
+  geom_sf(data = regions, lwd = 0.5, fill=NA) + 
+  #geom_sf_label_repel(data = regions, aes(label=region),size=2, fontface="bold") + 
+  scale_fill_manual(values = c("white","darkred","darkblue","lightblue","pink","grey")) + 
+  labs(title = "LISA plot: PC1",
+       subtitle = "age65, density, students, born_elsewhere") + 
+  theme_bw()
+
+lisa <- local_moran(queen_w, df["PC2"]) # or any other variable :)
+
+# process results
+df$cluster <- as.factor(lisa$GetClusterIndicators())
+levels(df$cluster) <- lisa$GetLabels()
+
+# A visual overview
+lisaPC2 <- ggplot() + 
+  geom_sf(data=gb, lwd=0.8) +
+  geom_sf(data = df, aes(fill = cluster), lwd=0.05, colour="black") + 
+  geom_sf(data = regions, lwd = 0.5, fill=NA) + 
+  #geom_sf_label_repel(data = regions, aes(label=region),size=2, fontface="bold") + 
+  scale_fill_manual(values = c("white","darkred","darkblue","lightblue","pink","grey")) + 
+  labs(title = "LISA plot: PC2",
+       subtitle = "low_qual, deprived") + 
+  theme_bw()
+
+
+plot_grid(lisaPC1, lisaPC2)
+```
+
+There are two large hot-spots along the east coast, north of the Wash, and a cold-spot region around and to the south-west of `London.` There are also a number of much smaller cases, particularly in the `North-West`, `Yorkshire and the Humber`, and the `West Midlands`. A number of Low-High and Hig-Low regions can also be identified, we strongly high or low levels of swing, but neighbouring areas with the opposite measure, particularly in the `North East`, `West Midlands`, and `London`. The following models will investigate these phenomena in more detail.
+
+## Supplemental images and figures used in presentation
+
+#### Regions image
+
+```{r, fig.height=8, fig.width=8}
+ggplot(regions) + 
+  geom_sf(aes(fill=region)) + 
+  scale_fill_brewer(type = "qual", palette = "Set3") + 
+  geom_sf_label_repel(aes(label=region)) + 
+  theme_bw() + 
+  labs(title = "Regions: England & Wales") + 
+  theme(legend.position = "none")
+```
+
+#### Rural-urban image
+
+```{r, fig.height=8, fig.width=8}
+ggplot() + 
+  geom_sf(data=df, aes(fill=rur_urb), lwd=0.2) + 
+  scale_fill_brewer(type = "qual", palette = "Paired", direction = -1) + 
+  geom_sf(data=gb, aes(fill=NA)) +
+ theme_bw() + 
+  labs(title = "Position on rural to urban spectrum: England & Wales") +
+  theme(legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(1.5, 'cm'), #change legend key height
+        legend.key.width = unit(1.5, 'cm'), #change legend key width
+        legend.title = element_text(size=15), #change legend title font size
+        legend.text = element_text(size=12)) #change legend text font size
+```
+
+#### Model 0 - SLR
+
+A simple linear regression of `con_swing` on `PC1` and `PC2`. Examination of the residuals shows a high degree of spatial correlation.
+
+```{r}
+model0 <- lm(con_swing ~ PC1 + PC2, data=df)
+summary(model0)
+
+par(mfrow=c(2,2))
+plot(model0)
+
+df$model0resids <- model0$residuals
+
+tm_shape(df) + 
+  tm_fill(col="model0resids", style='cont', palette="RdBu", id="constituency_name") + 
+  tm_shape(df) + tm_borders(lwd=0.1) + 
+  tm_shape(regions) + tm_borders(lwd=1)
+
+df_moran <- moran.test(df$model0resids, df_wts, zero.policy = TRUE)
+
+moran.plot(df$model0resids, 
+           df_wts, 
+           zero.policy = TRUE,
+           ylab = "Lagged residuals", 
+           xlab = "residuals",
+           col = "#6E0000", cex = .8, pch = 16)
+title(main = paste0("Moran's I = ", 
+               round(df_moran$estimate[1], digits = 3)))
+```
+
+
+#### Flip and swing graphics
+
+```{r}
+flipdf <- tibble(
+  party = rep(factor(c("Labour","Conservative","Others")),2),
+  `% votes` = c(45,40,15,42,46,12),
+  year = c(rep(2017,3),rep(2019,3)),
+  winner = factor(c(1,0,0,0,1,0))
+)
+
+ggplot(flipdf,aes(party,`% votes`,fill=party)) + geom_col(aes(colour=winner,size=winner), show.legend = FALSE) + 
+  scale_size_manual(values = c(0.1,2,0.1,2,0.1,0.1)) + 
+  scale_fill_manual(values = rep(c("darkblue","darkred","gray25"),2)) + 
+   scale_colour_manual(values = c("black","springgreen","black","black","black","springgreen")) + 
+ facet_wrap(~year) + 
+  theme_bw() +
+    geom_text(aes(label = paste0(`% votes`,"%")),
+              colour="white",
+              position = position_stack(vjust = .5),
+              size=7) + 
+  labs(title = "Constituency X") + 
+  ylim(0,50)
+
+ggplot(flipdf |> filter(party == "Conservative"),aes(party,`% votes`,fill=party)) + geom_col(colour="black") + 
+  scale_fill_manual(values = rep(c("darkblue"),2)) + 
+  facet_wrap(~year) + 
+  theme_bw() +
+    geom_text(aes(label = c("40%","+6%")),
+              colour="white",
+              position = position_stack(vjust = .5),
+              size=15) + 
+  labs(title = "Constituency X") + 
+  ylim(0,50)
+
+ggplot(flipdf |> filter(party == "Labour"),aes(party,`% votes`,fill=party)) + geom_col(colour="black") + 
+  scale_fill_manual(values = rep(c("darkred"),2)) + 
+  facet_wrap(~year) + 
+  theme_bw() +
+    geom_text(aes(label = c("45%","-3%")),
+              colour="white",
+              position = position_stack(vjust = .5),
+              size=15) + 
+  labs(title = "Constituency X") + 
+  ylim(0,50)
+```
+
+#### Map of flips
+
+```{r, fig.width=6,fig.height=8}
+ggplot(df) + 
+  geom_sf(aes(fill=con_flip_1917), lwd=0.1) + 
+  scale_fill_manual(values = c("orange","gray5")) + 
+  theme_bw() + 
+  labs(title = paste0(nrow(df |> filter(con_flip_1917=="ConFlip"))," Flips"), 
+                      subtitle = "Labour to Conservative") + 
+  theme(legend.position = "none") + 
+  theme(plot.title = element_text(size=32)) + 
+  theme(plot.subtitle = element_text(size=20))
+
+ggplot(df_hex) + 
+  geom_sf(aes(fill=con_flip_1917), lwd=0.1) + 
+  scale_fill_manual(values = c("orange","gray5")) + 
+  theme_bw()
+```
+
+#### Map of swings
+
+```{r, fig.width=6,fig.height=8}
+ggplot(df) + 
+  geom_sf(aes(fill = con_swing), lwd=0.05, colour="black") + 
+  scale_fill_steps2(low="black", mid="white", high="orange", midpoint = 0) + 
+  labs(title = "Swing", subtitle = "to Conservative from Labour") + 
+  theme_bw() + 
+  theme(legend.position = "none") + 
+  theme(plot.title = element_text(size=32)) + 
+  theme(plot.subtitle = element_text(size=20))
+
+
+ggplot(df_hex) + 
+  geom_sf(aes(fill = con_swing), lwd=0.05, colour="black") + 
+  scale_fill_steps2(low="black", mid="white", high="orange", midpoint = 0) + 
+  theme_bw()
+
+```
+
+```{r, fig.width=6,fig.height=8}
+
+ggplot(df_hex) + 
+  geom_sf(aes(fill=con_flip_1917), lwd=0.1) + 
+  scale_fill_manual(values = c("orange","gray5")) + 
+  theme_bw() + 
+  labs(title = "Flips") + 
+  theme(plot.title = element_text(size=32))
+
+
+ggplot(df_hex) + 
+  geom_sf(aes(fill = con_swing), lwd=0.05, colour="black") + 
+  scale_fill_steps2(low="black", mid="white", high="orange", midpoint = 0) + 
+  labs(title = "Swings") + 
+  theme_bw() + 
+  theme(plot.title = element_text(size=32))
+```
+
+#### Hanretty Brexit map
+
+```{r}
+ggplot(df) + 
+  geom_sf(aes(fill=leave_hanretty),lwd=0.1) + 
+  scale_fill_gradient2(low = "darkblue",mid = "white",high = "darkgreen", midpoint = 50) + 
+  labs(title = "Estimated (Hanretty) Brexit Leave %") + 
+  theme_bw()
+
+ggplot(df_hex) + 
+  geom_sf(aes(fill=leave_hanretty),lwd=0.1) + 
+  scale_fill_gradient2(low = "darkblue",mid = "white",high = "darkgreen", midpoint = 50) + 
+  labs(title = "Estimated (Hanretty) Brexit Leave %") + 
+  theme_bw()
+
+```
+
+
