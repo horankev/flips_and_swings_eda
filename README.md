@@ -453,15 +453,19 @@ opposite measure, particularly in the `North East`, `West Midlands`, and
 `London`. The following models will investigate these phenomena in more
 detail.
 
+Looking just at the London portion…
+
+![](README_files/figure-markdown_github/unnamed-chunk-41-1.png)
+
 ## Supplemental images and figures used in presentation
 
 #### Regions image
 
-![](README_files/figure-markdown_github/unnamed-chunk-41-1.png)
+![](README_files/figure-markdown_github/unnamed-chunk-42-1.png)
 
 #### Rural-urban image
 
-![](README_files/figure-markdown_github/unnamed-chunk-42-1.png)
+![](README_files/figure-markdown_github/unnamed-chunk-43-1.png)
 
 #### Model 0 - SLR
 
@@ -488,24 +492,24 @@ Examination of the residuals shows a high degree of spatial correlation.
     #> Multiple R-squared:  0.4534, Adjusted R-squared:  0.4515 
     #> F-statistic: 235.6 on 2 and 568 DF,  p-value: < 2.2e-16
 
-![](README_files/figure-markdown_github/unnamed-chunk-43-1.png)![](README_files/figure-markdown_github/unnamed-chunk-43-2.png)
+![](README_files/figure-markdown_github/unnamed-chunk-44-1.png)![](README_files/figure-markdown_github/unnamed-chunk-44-2.png)
 
-<img src="README_files/figure-markdown_github/unnamed-chunk-44-1.png" style="display: block; margin: auto;" />
+<img src="README_files/figure-markdown_github/unnamed-chunk-45-1.png" style="display: block; margin: auto;" />
 
 #### Flip and swing graphics
 
-![](README_files/figure-markdown_github/unnamed-chunk-45-1.png)
+![](README_files/figure-markdown_github/unnamed-chunk-46-1.png)
 
 #### Map of flips
 
-![](README_files/figure-markdown_github/unnamed-chunk-46-1.png)
+![](README_files/figure-markdown_github/unnamed-chunk-47-1.png)
 
 #### Map of swings
 
-![](README_files/figure-markdown_github/unnamed-chunk-47-1.png)
-
 ![](README_files/figure-markdown_github/unnamed-chunk-48-1.png)
+
+![](README_files/figure-markdown_github/unnamed-chunk-49-1.png)
 
 #### Hanretty Brexit map
 
-![](README_files/figure-markdown_github/unnamed-chunk-49-1.png)
+![](README_files/figure-markdown_github/unnamed-chunk-50-1.png)

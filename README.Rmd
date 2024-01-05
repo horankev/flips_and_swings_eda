@@ -1341,45 +1341,74 @@ Equivalent LISA plots are shown below for the covariates PC1 and PC2.
 
 ```{r, fig.width=10, fig.height=5}
 
-lisa <- local_moran(queen_w, df["PC1"]) # or any other variable :)
+lisa1 <- local_moran(queen_w, df["PC1"]) # or any other variable :)
 
 # process results
-df$cluster <- as.factor(lisa$GetClusterIndicators())
-levels(df$cluster) <- lisa$GetLabels()
+df$clusterl1 <- as.factor(lisa1$GetClusterIndicators())
+levels(df$clusterl1) <- lisa1$GetLabels()
 
 # A visual overview
 lisaPC1 <- ggplot() + 
   geom_sf(data=gb, lwd=0.8) +
-  geom_sf(data = df, aes(fill = cluster), lwd=0.05, colour="black") + 
+  geom_sf(data = df, aes(fill = clusterl1), lwd=0.05, colour="black") + 
   geom_sf(data = regions, lwd = 0.5, fill=NA) + 
   #geom_sf_label_repel(data = regions, aes(label=region),size=2, fontface="bold") + 
   scale_fill_manual(values = c("white","darkred","darkblue","lightblue","pink","grey")) + 
   labs(title = "LISA plot: PC1",
-       subtitle = "age65, density, students, born_elsewhere") + 
-  theme_bw()
+       subtitle = "HIGH => younger, with lower density, fewer students & born_elsewhere") + 
+  theme_bw() + 
+  theme(plot.subtitle = element_text(size=8))
 
-lisa <- local_moran(queen_w, df["PC2"]) # or any other variable :)
+lisa2 <- local_moran(queen_w, df["PC2"]) # or any other variable :)
 
 # process results
-df$cluster <- as.factor(lisa$GetClusterIndicators())
-levels(df$cluster) <- lisa$GetLabels()
+df$clusterl2 <- as.factor(lisa2$GetClusterIndicators())
+levels(df$clusterl2) <- lisa2$GetLabels()
 
 # A visual overview
 lisaPC2 <- ggplot() + 
   geom_sf(data=gb, lwd=0.8) +
-  geom_sf(data = df, aes(fill = cluster), lwd=0.05, colour="black") + 
+  geom_sf(data = df, aes(fill = clusterl2), lwd=0.05, colour="black") + 
   geom_sf(data = regions, lwd = 0.5, fill=NA) + 
   #geom_sf_label_repel(data = regions, aes(label=region),size=2, fontface="bold") + 
   scale_fill_manual(values = c("white","darkred","darkblue","lightblue","pink","grey")) + 
   labs(title = "LISA plot: PC2",
-       subtitle = "low_qual, deprived") + 
-  theme_bw()
+       subtitle = "HIGH => more qualifications, less deprived") + 
+  theme_bw() + 
+  theme(plot.subtitle = element_text(size=8))
 
 
 plot_grid(lisaPC1, lisaPC2)
 ```
 
 There are two large hot-spots along the east coast, north of the Wash, and a cold-spot region around and to the south-west of `London.` There are also a number of much smaller cases, particularly in the `North-West`, `Yorkshire and the Humber`, and the `West Midlands`. A number of Low-High and Hig-Low regions can also be identified, we strongly high or low levels of swing, but neighbouring areas with the opposite measure, particularly in the `North East`, `West Midlands`, and `London`. The following models will investigate these phenomena in more detail.
+
+Looking just at the London portion...
+
+```{r, fig.width=10, fig.height=5}
+lisaPClond1 <- ggplot() + 
+  geom_sf(data = df |> filter(region=="London"), aes(fill = clusterl1), lwd=0.05, colour="black") + 
+  geom_sf(data = regions |> filter(region=="London"), lwd = 0.5, fill=NA) + 
+  #geom_sf_label_repel(data = regions, aes(label=region),size=2, fontface="bold") + 
+  scale_fill_manual(values = c("white","darkred","darkblue","lightblue","pink","grey")) + 
+  labs(title = "LISA London plot: PC1",
+       subtitle = "HIGH => younger, with lower density, fewer students & born_elsewhere") + 
+  theme_bw() + 
+  theme(plot.subtitle = element_text(size=8))
+
+lisaPClond2 <- ggplot() + 
+  geom_sf(data = df |> filter(region=="London"), aes(fill = clusterl2), lwd=0.05, colour="black") + 
+  geom_sf(data = regions |> filter(region=="London"), lwd = 0.5, fill=NA) + 
+  #geom_sf_label_repel(data = regions, aes(label=region),size=2, fontface="bold") + 
+  scale_fill_manual(values = c("white","darkred","darkblue","lightblue","pink","grey")) + 
+  labs(title = "LISA London plot: PC2",
+       subtitle = "HIGH => more qualifications, less deprived") + 
+  theme_bw() + 
+  theme(plot.subtitle = element_text(size=8))
+
+
+plot_grid(lisaPClond1, lisaPClond2)
+```
 
 ## Supplemental images and figures used in presentation
 
