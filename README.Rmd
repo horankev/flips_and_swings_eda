@@ -31,7 +31,7 @@ Following this, the study extends beyond the flipping of seats to examine a cont
 The electoral and census data is sourced from the `parlitools` package in R. The electoral data is the published results of the 2019 elections, in addition those from 2017, 2015 and 2010. This information is combined with information from the 2011 census, aggregated to the level of Westminster constituencies, which provides a host of information about the demographic and economic composition of each constituency. It features 191 variables, from which six have been selected as being representative. These variables are:
 
 | Variable name    | Composition                                                                     |
-|---------------------|---------------------------------------------------|
+|----------------------|--------------------------------------------------|
 | `low_qual`       | \% of population whose highest qualification is 'no qualification' or 'level 1' |
 | `deprived`       | \% of population categorised as exhibiting levels 1-4 of deprivation            |
 | `over65`         | \% of population aged 65 or over                                                |
@@ -425,6 +425,15 @@ ggplot() +
   theme(panel.background = element_rect(fill = NA, color = "black",size = 2))
 ```
 
+| Quadrant          | Characteristics                            |
+|-------------------|--------------------------------------------|
+| Top-Left (TL)     | older, low density, wealthy                |
+| Top-Right (TR)    | younger, high density, high qualifications |
+| Bottom-Left (BL)  | older, low density, low qualifications     |
+| Bottom-Right (BR) | younger, high density, high deprived       |
+
+: Predominant characteristics of each quadrant
+
 ```{r}
 # quad_df <- tibble(
 #   Quadrant = c("Top-Left (TL)",
@@ -439,18 +448,18 @@ ggplot() +
 #     kable_paper(full_width = F)  |> 
 #   column_spec(1, bold = TRUE)
 
-quad_df <- tibble(
-  Quadrant = c("Top-Left (TL)",
-               "Top-Right (TR)",
-               "Bottom-Left (BL)",
-               "Bottom-Right (BR)"),
-  Characteristics = c("older, low density, wealthy",
-                      "younger, high density, high qualifications",
-                      "older, low density, low qualifications",
-                      "younger, high density, high deprived")
-)
-
-quad_df
+# quad_df <- tibble(
+#   Quadrant = c("Top-Left (TL)",
+#                "Top-Right (TR)",
+#                "Bottom-Left (BL)",
+#                "Bottom-Right (BR)"),
+#   Characteristics = c("older, low density, wealthy",
+#                       "younger, high density, high qualifications",
+#                       "older, low density, low qualifications",
+#                       "younger, high density, high deprived")
+# )
+# 
+# quad_df
 ```
 
 ## Flips
@@ -1207,9 +1216,11 @@ The table below shows that only four of the highest ten constituency swings resu
 
 df |> 
   select(constituency_name,region,rur_urb,con_swing,con_flip_1917) |> 
-  arrange(desc(con_swing)) |> 
+  mutate(constituency_name = substr(df$constituency_name,1,15)) |> 
+  arrange(desc(con_swing)) |>
   mutate(swing_rank = seq_along(1:nrow(df)),
          con_swing = paste0(round(con_swing,2),"%")) |> 
+   
   head(10)
 ```
 
@@ -1430,7 +1441,6 @@ title(main = paste0("Moran's I = ",
                round(df_moran$estimate[1], digits = 3)))
 ```
 
-
 #### Flip and swing graphics
 
 ```{r}
@@ -1479,7 +1489,8 @@ ggplot(flipdf |> filter(party == "Labour"),aes(party,`% votes`,fill=party)) + ge
 
 #### Map of flips
 
-```{r, fig.width=6,fig.height=8}
+```{r, fig.width=12,fig.height=8}
+ggarrange(
 ggplot(df) + 
   geom_sf(aes(fill=con_flip_1917), lwd=0.1) + 
   scale_fill_manual(values = c("orange","gray5")) + 
@@ -1488,42 +1499,53 @@ ggplot(df) +
                       subtitle = "Labour to Conservative") + 
   theme(legend.position = "none") + 
   theme(plot.title = element_text(size=32)) + 
-  theme(plot.subtitle = element_text(size=20))
+  theme(plot.subtitle = element_text(size=20)),
 
 ggplot(df_hex) + 
   geom_sf(aes(fill=con_flip_1917), lwd=0.1) + 
   scale_fill_manual(values = c("orange","gray5")) + 
-  theme_bw()
+  coord_sf(datum = NA) +
+  theme_bw(),
+
+ncol=2)
 ```
 
 #### Map of swings
 
-```{r, fig.width=6,fig.height=8}
+```{r, fig.width=12,fig.height=8}
+ggarrange(
 ggplot(df) + 
   geom_sf(aes(fill = con_swing), lwd=0.05, colour="black") + 
-  scale_fill_steps2(low="black", mid="white", high="orange", midpoint = 0) + 
+  scale_fill_steps2(low="gray5", mid="white", high="orange") + 
   labs(title = "Swing", subtitle = "to Conservative from Labour") + 
   theme_bw() + 
   theme(legend.position = "none") + 
   theme(plot.title = element_text(size=32)) + 
-  theme(plot.subtitle = element_text(size=20))
+  theme(plot.subtitle = element_text(size=20)),
 
 
 ggplot(df_hex) + 
-  geom_sf(aes(fill = con_swing), lwd=0.05, colour="black") + 
-  scale_fill_steps2(low="black", mid="white", high="orange", midpoint = 0) + 
-  theme_bw()
+  geom_sf(aes(fill = con_swing, colour = con_swing), lwd=0.05) + 
+  scale_fill_steps2(low="gray5", mid="white", high="orange") + 
+  scale_colour_steps2(low="gray5", mid="white", high="orange") + 
+  coord_sf(datum = NA) +
+  theme_bw() + 
+  theme(legend.position = "right"),
+
+ncol=2
+)
 
 ```
 
-```{r, fig.width=6,fig.height=8}
-
+```{r, fig.width=12,fig.height=8}
+ggarrange(
 ggplot(df_hex) + 
   geom_sf(aes(fill=con_flip_1917), lwd=0.1) + 
   scale_fill_manual(values = c("orange","gray5")) + 
+  coord_sf(datum = NA) +
   theme_bw() + 
   labs(title = "Flips") + 
-  theme(plot.title = element_text(size=32))
+  theme(plot.title = element_text(size=32)),
 
 
 ggplot(df_hex) + 
@@ -1531,24 +1553,34 @@ ggplot(df_hex) +
   scale_fill_steps2(low="black", mid="white", high="orange", midpoint = 0) + 
   labs(title = "Swings") + 
   theme_bw() + 
-  theme(plot.title = element_text(size=32))
+  coord_sf(datum = NA) +
+  theme(plot.title = element_text(size=32)),
+
+ncol=2,
+legend = "bottom"
+)
 ```
 
 #### Hanretty Brexit map
 
-```{r}
+```{r, fig.width=12, fig.height=8}
+ggarrange(
 ggplot(df) + 
   geom_sf(aes(fill=leave_hanretty),lwd=0.1) + 
   scale_fill_gradient2(low = "darkblue",mid = "white",high = "darkgreen", midpoint = 50) + 
   labs(title = "Estimated (Hanretty) Brexit Leave %") + 
-  theme_bw()
+  theme_bw(),
 
 ggplot(df_hex) + 
   geom_sf(aes(fill=leave_hanretty),lwd=0.1) + 
   scale_fill_gradient2(low = "darkblue",mid = "white",high = "darkgreen", midpoint = 50) + 
+  coord_sf(datum = NA) +
   labs(title = "Estimated (Hanretty) Brexit Leave %") + 
-  theme_bw()
+  theme_bw(),
+
+ncol=2,
+legend="bottom",
+common.legend = TRUE
+)
 
 ```
-
-

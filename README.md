@@ -43,7 +43,7 @@ features 191 variables, from which six have been selected as being
 representative. These variables are:
 
 | Variable name    | Composition                                                                    |
-|----------------------|--------------------------------------------------|
+|-----------------------|-------------------------------------------------|
 | `low_qual`       | % of population whose highest qualification is ‘no qualification’ or ‘level 1’ |
 | `deprived`       | % of population categorised as exhibiting levels 1-4 of deprivation            |
 | `over65`         | % of population aged 65 or over                                                |
@@ -146,13 +146,14 @@ according to differing demographic, economic and educational structures.
 
 ![](README_files/figure-markdown_github/unnamed-chunk-13-1.png)
 
-    #> # A tibble: 4 × 2
-    #>   Quadrant          Characteristics                           
-    #>   <chr>             <chr>                                     
-    #> 1 Top-Left (TL)     older, low density, wealthy               
-    #> 2 Top-Right (TR)    younger, high density, high qualifications
-    #> 3 Bottom-Left (BL)  older, low density, low qualifications    
-    #> 4 Bottom-Right (BR) younger, high density, high deprived
+| Quadrant          | Characteristics                            |
+|-------------------|--------------------------------------------|
+| Top-Left (TL)     | older, low density, wealthy                |
+| Top-Right (TR)    | younger, high density, high qualifications |
+| Bottom-Left (BL)  | older, low density, low qualifications     |
+| Bottom-Right (BR) | younger, high density, high deprived       |
+
+Predominant characteristics of each quadrant
 
 ## Flips
 
@@ -377,18 +378,18 @@ understand the poor Labour performance.
     #> Bounding box:  xmin: -2.212514 ymin: 52.49186 xmax: -0.0405247 ymax: 54.64483
     #> Geodetic CRS:  WGS 84
     #> # A tibble: 10 × 7
-    #>    constituency_name                    region   rur_urb con_swing con_flip_1917
-    #>    <chr>                                <chr>    <fct>   <chr>     <chr>        
-    #>  1 Bassetlaw                            East Mi… Medium… 18.42%    ConFlip      
-    #>  2 Dudley North                         West Mi… Large … 15.75%    ConFlip      
-    #>  3 Mansfield                            East Mi… Large … 15.49%    NoConFlip    
-    #>  4 Redcar                               North E… Medium… 15.46%    ConFlip      
-    #>  5 Leicester East                       East Mi… Other … 15.3%     NoConFlip    
-    #>  6 Great Grimsby                        Yorkshi… Large … 14.69%    ConFlip      
-    #>  7 Wentworth and Dearne                 Yorkshi… Medium… 14.24%    NoConFlip    
-    #>  8 Doncaster North                      Yorkshi… Small … 13.66%    NoConFlip    
-    #>  9 Stoke-On-Trent South                 West Mi… Other … 13.43%    NoConFlip    
-    #> 10 Normanton, Pontefract and Castleford Yorkshi… Medium… 13.42%    NoConFlip    
+    #>    constituency_name region                   rur_urb    con_swing con_flip_1917
+    #>    <chr>             <chr>                    <fct>      <chr>     <chr>        
+    #>  1 "Bassetlaw"       East Midlands            Medium To… 18.42%    ConFlip      
+    #>  2 "Dudley North"    West Midlands            Large Town 15.75%    ConFlip      
+    #>  3 "Mansfield"       East Midlands            Large Town 15.49%    NoConFlip    
+    #>  4 "Redcar"          North East               Medium To… 15.46%    ConFlip      
+    #>  5 "Leicester East"  East Midlands            Other City 15.3%     NoConFlip    
+    #>  6 "Great Grimsby"   Yorkshire and The Humber Large Town 14.69%    ConFlip      
+    #>  7 "Wentworth and D" Yorkshire and The Humber Medium To… 14.24%    NoConFlip    
+    #>  8 "Doncaster North" Yorkshire and The Humber Small Town 13.66%    NoConFlip    
+    #>  9 "Stoke-On-Trent " West Midlands            Other City 13.43%    NoConFlip    
+    #> 10 "Normanton, Pont" Yorkshire and The Humber Medium To… 13.42%    NoConFlip    
     #> # ℹ 2 more variables: geometry <MULTIPOLYGON [°]>, swing_rank <int>
 
 The *swing*, as described in the introduction, is a measure of the
@@ -495,14 +496,14 @@ Examination of the residuals shows a high degree of spatial correlation.
 
 #### Map of flips
 
-![](README_files/figure-markdown_github/unnamed-chunk-45-1.png)![](README_files/figure-markdown_github/unnamed-chunk-45-2.png)
+![](README_files/figure-markdown_github/unnamed-chunk-45-1.png)
 
 #### Map of swings
 
-![](README_files/figure-markdown_github/unnamed-chunk-46-1.png)![](README_files/figure-markdown_github/unnamed-chunk-46-2.png)
+![](README_files/figure-markdown_github/unnamed-chunk-46-1.png)
 
-![](README_files/figure-markdown_github/unnamed-chunk-47-1.png)![](README_files/figure-markdown_github/unnamed-chunk-47-2.png)
+![](README_files/figure-markdown_github/unnamed-chunk-47-1.png)
 
 #### Hanretty Brexit map
 
-![](README_files/figure-markdown_github/unnamed-chunk-48-1.png)![](README_files/figure-markdown_github/unnamed-chunk-48-2.png)
+![](README_files/figure-markdown_github/unnamed-chunk-48-1.png)
