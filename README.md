@@ -67,25 +67,10 @@ Throughout the study, `con_19` will refer to the percentage of
 legitimate votes which were cast for the Conservatives (along with
 equivalent variables such as `con_17`, `lab_19` and `lab_17`). The
 measure of swing which will be used is called the “*Butler swing*”,
-hereafter abbreviated to `con_swing`, and is calculated as follows:
-
-$$
-\textrm{Butler Swing} = \frac{(Con 2019 - Con 2017) - (Lab 2019 - Lab 2017)}{2}
-$$
-where *C**o**n*2019 and *C**o**n*2017 represent the percentage of votes
-which were cast for the Conservative party in 2019 and 2017
-respectively, while *L**a**b*2019 and *L**a**b*2017 correspond to the
-equivalent for the Labour party. It is calculated on the basis of total
-number of votes cast, including those cast for candidates other than
-Conservative or Labour. For example, an increase of Conservative vote
-share by 4.9%, combined with a decrease in Labour vote share of 7.9%
-would lead to a swing from Labour to the Conservatives of
-$$
-\frac{4.9\\ - (-7.9\\)}{2}=6.4\\$$
-
-Put another way, if the Conservatives benefited from a two-percentage
-point swing having initially had an equal vote share, they would now
-have a four-percentage point majority over Labour.
+hereafter abbreviated to `con_swing`, and is calculated as the mean of
+the difference between the change in percentage points for the
+Conservatives from 2017-2019 and the change in percentage points for
+Labour.
 
 The resultant variable should be interpreted as the swing from Labour to
 the Conservatives between the 2017 and 2019 general elections.
